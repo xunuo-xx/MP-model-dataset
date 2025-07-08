@@ -3,52 +3,78 @@ import datetime
 from bs4 import BeautifulSoup  
 import sys
 import os
-# write by chenkangjun ckj@lasg.iap.ac.cn 20240109
-url = "http://data.lasg.ac.cn/FGOALS-f3-L/" 
 
-def getMonth_1(start,end):
-    startDate = datetime.datetime.strptime(start, '%Y-%m-%d')
-    endDate = datetime.datetime.strptime(end, '%Y-%m-%d')
-    months = (endDate.year - startDate.year) * 12 + endDate.month - startDate.month
-    # print(months)
-    month_range=[]
-    for x in range(0,months+1):
-        nowMonth=(startDate.month-1+x)
-        date='%s%s'%(startDate.year+nowMonth//12,f'{(nowMonth%12+1):02d}')
-        month_range.append(date)
-    return month_range
+# Fixed parameters (no command-line arguments needed)
+exp_name = "amip"         # Experiment name
+table_ID = "Amon"         # Table ID
+var_name = "pr"           # Variable name
+start_time = "1979-01-01" # Start date
+end_time = "2021-12-31"   # End date
+download_dir = "./FGOALS_data"  # Download directory (modifiable)
+base_url = "https://labesm-data.iap.ac.cn/FGOALS-f3-L/"  # Data repository URL
 
-if len( sys.argv[1:]) != 4:
-    print("Pls input argvs! example ###python get_FGOALS_data.py ExperimentName TableID Start_Time End_Time###")
-    print("ExperimentName is amip,amip-NMO ,amip-NS-MO")
-    print("TableID is 1hr,6hr,Amon,day,fx")
-    print("Start_Time and End_Time see URL http://data.lasg.ac.cn/FGOALS-f3-L/")
-    print("Sample Command Format:python get_FGOALS_data.py amip 1hr 2021-01-02 2021-02-02")
-else:
-    exp_name=sys.argv[1] 
-    table_ID=sys.argv[2] 
-    Start_Time=sys.argv[3]
-    End_Time=sys.argv[4]
+def generate_month_range(start_date_str, end_date_str):
+    """Generate a list of months in YYYYMM format between two dates"""
+    start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d')
+    end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d')
+    total_months = (end_date.year - start_date.year) * 12 + end_date.month - start_date.month
+    month_list = []
+    
+    for offset in range(0, total_months + 1):
+        current_month = (start_date.month - 1 + offset)
+        date_str = f"{start_date.year + current_month // 12}{(current_month % 12 + 1):02d}"
+        month_list.append(date_str)
+    
+    return month_list
 
-    response = requests.get(url)  
+# Create download directory if it doesn't exist
+if not os.path.exists(download_dir):
+    os.makedirs(download_dir)
+    print(f"Created download directory: {download_dir}")
+
+try:
+    # Fetch directory listing from data repository
+    response = requests.get(base_url)  
     soup = BeautifulSoup(response.text, "html.parser")  
-  
-# 提取所有的href标签的值  
-    href_values = [a["href"] for a in soup.find_all("a")]  
-    print(len(href_values))
-  
-# 输出href的值 
-    listA=[]
-    for href in href_values:  
-    #     print(href)
-    # wenzi="/FGOALS-f3-L/amip/r1i1p1f1/1hr/pr/gr/v20231216/pr_1hr_FGOALS-f3-L_amip_r1i1p1f1_gr_202101010030-202112161030.nc"
-        str2=['/'+exp_name+'/','/'+table_ID+'/']
-        str3=getMonth_1(Start_Time,End_Time)
+
+    # Extract all href links from the page
+    all_links = [a["href"] for a in soup.find_all("a")]  
+    print(f"Found {len(all_links)} files in repository, starting filtering...")
+
+    # Filter matching files based on criteria
+    matching_files = []
+    for link in all_links:  
+        # Required patterns: experiment name, table ID, variable name
+        required_patterns = [
+            f'/{exp_name}/',
+            f'/{table_ID}/',
+            f'/{var_name}/'
+        ]
         
-        if all(string in href for string in str2) and any(x in href for x in str3): 
-            listA.append(href[1:])
+        time_periods = generate_month_range(start_time, end_time)
         
-    # print(exp_name,table_ID,Start_Time,End_Time)
-# print(listA)
-    for i in listA:
-        os.system('wget -N ' +url+i)
+        # Check if link matches all required patterns and time period
+        if all(pattern in link for pattern in required_patterns) and any(period in link for period in time_periods): 
+            matching_files.append(link[1:])  # Remove leading '/'
+    
+    print(f"Identified {len(matching_files)} files matching criteria")
+
+    # Download files to target directory
+    for file_path in matching_files:
+        file_url = base_url + file_path
+        file_name = os.path.basename(file_path)
+        download_cmd = f'wget -N -P "{download_dir}" {file_url}'
+        print(f"Downloading: {file_name}")
+        os.system(download_cmd)
+
+    # Final status report
+    print("=" * 50)
+    print(f"Download complete! Data saved to: {os.path.abspath(download_dir)}")
+    print(f"Successfully downloaded {len(matching_files)} out of {len(all_links)} files")
+
+except requests.exceptions.RequestException as e:
+    print(f"Network error occurred: {e}")
+    sys.exit(1)
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+    sys.exit(1)
